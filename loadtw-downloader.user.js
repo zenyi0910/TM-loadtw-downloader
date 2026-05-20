@@ -1,10 +1,12 @@
 // ==UserScript==
-// @name         load.tw 自動解鎖+下載
+// @name         load.tw / myppt.cc / lurl.cc 自動解鎖+下載
 // @namespace    https://github.com/zenyi0910/TM-loadtw-downloader
-// @version      1.0.0
-// @description  load.tw 自動帶入日期密碼解鎖，一鍵下載影片/圖片
+// @version      2.0.0
+// @description  自動帶入日期密碼解鎖，一鍵下載影片/圖片（支援 load.tw / myppt.cc / lurl.cc）
 // @author       Yi
 // @match        https://load.tw/*
+// @match        https://myppt.cc/*
+// @match        https://lurl.cc/*
 // @grant        GM_download
 // @grant        GM_addStyle
 // @run-at       document-idle
@@ -16,8 +18,10 @@
 (function() {
     'use strict';
 
+    const HOST = location.hostname;
+
     GM_addStyle(`
-        .loadtw-dl-btn {
+        .yi-dl-btn {
             position: fixed;
             bottom: 24px;
             right: 24px;
@@ -36,25 +40,43 @@
             align-items: center;
             gap: 8px;
         }
-        .loadtw-dl-btn:hover {
+        .yi-dl-btn:hover {
             background: #0070e0;
             transform: translateY(-2px);
             box-shadow: 0 6px 16px rgba(10,132,255,0.5);
         }
-        .loadtw-dl-btn:active { transform: translateY(0); }
-        .loadtw-dl-btn.downloading {
+        .yi-dl-btn:active { transform: translateY(0); }
+        .yi-dl-btn.downloading {
             background: #555;
             pointer-events: none;
         }
     `);
 
+    // ==================== 媒體偵測 ====================
     function findMediaUrl() {
+        // Video
         const video = document.querySelector('video');
-        if (video && (video.src || video.currentSrc)) return video.src || video.currentSrc;
-        const source = document.querySelector('video source');
-        if (source && source.src) return source.src;
-        const img = document.querySelector('main img[src*="store"]');
-        if (img) return img.src;
+        if (video) {
+            const src = video.src || video.currentSrc;
+            if (src) return src;
+            const source = video.querySelector('source');
+            if (source && source.src) return source.src;
+        }
+        // Image (content area)
+        const selectors = [
+            'main img[src*="store"]',
+            'img[src*="myppt"]',
+            'img[src*="lurl"]',
+            'img[src*="imgur"]',
+            '.content img[src*="store"]'
+        ];
+        for (const sel of selectors) {
+            const img = document.querySelector(sel);
+            if (img && img.src) return img.src;
+        }
+        // Preload links (lurl/myppt images)
+        const preload = document.querySelector('link[rel="preload"][as="image"]');
+        if (preload && preload.href) return preload.href;
         return null;
     }
 
@@ -62,22 +84,27 @@
         return url.split('/').pop().split('?')[0] || 'download.mp4';
     }
 
+    // ==================== 自動密碼 ====================
     function autoFillPassword() {
-        // 從頁面顯示的日期提取 MMDD（如「2026/05/19」→ 0519）
-        const dateEl = document.body.innerText.match(/(\d{4})[\/\-](\d{2})[\/\-](\d{2})/);
-        if (!dateEl) return false;
+        if (HOST.includes('load.tw')) return loadTwPassword();
+        if (HOST.includes('myppt.cc')) return mypptPassword();
+        if (HOST.includes('lurl.cc')) return lurlPassword();
+        return false;
+    }
 
-        const password = dateEl[2] + dateEl[3]; // MMDD
+    function loadTwPassword() {
+        // 從頁面日期文字提取 MMDD
+        const dateMatch = document.body.innerText.match(/(\d{4})[\/\-](\d{2})[\/\-](\d{2})/);
+        if (!dateMatch) return false;
+        const password = dateMatch[2] + dateMatch[3];
 
-        // 找密碼輸入框
         const pwdInput = document.querySelector('input[type="text"], input[type="password"]');
         if (!pwdInput) return false;
 
-        // 填入密碼
         pwdInput.value = password;
         pwdInput.dispatchEvent(new Event('input', { bubbles: true }));
 
-        // 點擊解鎖按鈕
+        // 點解鎖按鈕
         const btns = document.querySelectorAll('button');
         for (const btn of btns) {
             if (btn.textContent.includes('解鎖') || btn.textContent.includes('Unlock')) {
@@ -88,13 +115,70 @@
         return false;
     }
 
+    function mypptPassword() {
+        // myppt 用 cookie 機制：psc_{id} = MMDD
+        const idMatch = location.href.match(/myppt\.cc\/(\w+)/);
+        if (!idMatch) return false;
+        const cookieName = 'psc_' + idMatch[1];
+
+        // 已有 cookie 就跳過
+        if (document.cookie.includes(cookieName)) return false;
+
+        // 從頁面日期或 video URL 提取日期
+        const dateMatch = document.body.innerText.match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+        let mmdd = null;
+        if (dateMatch) {
+            mmdd = dateMatch[2].padStart(2,'0') + dateMatch[3].padStart(2,'0');
+        } else {
+            // 從 video src URL 提取: /20260520/xxx.mp4
+            const vidSrc = document.querySelector('video source');
+            if (vidSrc && vidSrc.src) {
+                const m = vidSrc.src.match(/\/(\d{4})(\d{2})(\d{2})\//);
+                if (m) mmdd = m[2] + m[3];
+            }
+        }
+        if (!mmdd) return false;
+
+        // 設 cookie 並 reload
+        document.cookie = `${cookieName}=${mmdd}; path=/; max-age=${7*86400}`;
+        location.reload();
+        return true;
+    }
+
+    function lurlPassword() {
+        // lurl 跟 myppt 機制相同
+        const idMatch = location.href.match(/lurl\.cc\/(\w+)/);
+        if (!idMatch) return false;
+        const cookieName = 'psc_' + idMatch[1];
+
+        if (document.cookie.includes(cookieName)) return false;
+
+        const dateMatch = document.body.innerText.match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+        let mmdd = null;
+        if (dateMatch) {
+            mmdd = dateMatch[2].padStart(2,'0') + dateMatch[3].padStart(2,'0');
+        } else {
+            const vidSrc = document.querySelector('video source');
+            if (vidSrc && vidSrc.src) {
+                const m = vidSrc.src.match(/\/(\d{4})(\d{2})(\d{2})\//);
+                if (m) mmdd = m[2] + m[3];
+            }
+        }
+        if (!mmdd) return false;
+
+        document.cookie = `${cookieName}=${mmdd}; path=/; max-age=${7*86400}`;
+        location.reload();
+        return true;
+    }
+
+    // ==================== 下載按鈕 ====================
     function createButton() {
-        if (document.querySelector('.loadtw-dl-btn')) return;
+        if (document.querySelector('.yi-dl-btn')) return;
         const url = findMediaUrl();
         if (!url) return;
 
         const btn = document.createElement('button');
-        btn.className = 'loadtw-dl-btn';
+        btn.className = 'yi-dl-btn';
         btn.innerHTML = '⬇ 下載';
         btn.title = getFilename(url);
 
@@ -105,42 +189,33 @@
             btn.classList.add('downloading');
             btn.innerHTML = '⏳ 下載中...';
 
+            const headers = {
+                'Referer': location.origin + '/',
+                'sec-fetch-dest': 'video',
+                'sec-fetch-mode': 'no-cors',
+                'sec-fetch-site': 'same-site'
+            };
+
             if (typeof GM_download !== 'undefined') {
                 GM_download({
                     url: mediaUrl,
                     name: getFilename(mediaUrl),
-                    headers: {
-                        'Referer': 'https://load.tw/',
-                        'sec-fetch-dest': 'video',
-                        'sec-fetch-mode': 'no-cors',
-                        'sec-fetch-site': 'same-site'
-                    },
-                    onload: function() {
+                    headers: headers,
+                    onload: () => {
                         btn.innerHTML = '✅ 完成';
                         setTimeout(() => {
                             btn.classList.remove('downloading');
                             btn.innerHTML = '⬇ 下載';
                         }, 3000);
                     },
-                    onerror: function() {
-                        // Fallback: anchor download
-                        const a = document.createElement('a');
-                        a.href = mediaUrl;
-                        a.download = getFilename(mediaUrl);
-                        document.body.appendChild(a);
-                        a.click();
-                        a.remove();
+                    onerror: () => {
+                        fallbackDownload(mediaUrl);
                         btn.classList.remove('downloading');
                         btn.innerHTML = '⬇ 下載';
                     }
                 });
             } else {
-                const a = document.createElement('a');
-                a.href = mediaUrl;
-                a.download = getFilename(mediaUrl);
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
+                fallbackDownload(mediaUrl);
                 btn.classList.remove('downloading');
                 btn.innerHTML = '⬇ 下載';
             }
@@ -149,17 +224,23 @@
         document.body.appendChild(btn);
     }
 
+    function fallbackDownload(url) {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = getFilename(url);
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+    }
+
+    // ==================== 初始化 ====================
     function init() {
-        // 如果已有媒體，直接建按鈕
         if (findMediaUrl()) {
             createButton();
             return;
         }
-
-        // 嘗試自動填密碼
         autoFillPassword();
 
-        // 監聽 DOM 變化（密碼解鎖後會載入媒體）
         const observer = new MutationObserver(() => {
             if (findMediaUrl()) {
                 observer.disconnect();
@@ -170,9 +251,9 @@
         setTimeout(() => observer.disconnect(), 30000);
     }
 
-    // 年齡確認頁面：自動點擊後再初始化
-    const ageBtn = Array.from(document.querySelectorAll('button'))
-        .find(b => b.textContent.includes('18'));
+    // 年齡確認：自動點擊
+    const ageBtn = document.getElementById('confirmOver18')
+        || Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('18'));
     if (ageBtn) {
         ageBtn.click();
         setTimeout(init, 1500);
