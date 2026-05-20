@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         load.tw 自動解鎖+下載
-// @namespace    https://github.com/Jeffrey0117/TM-loadtw-downloader
+// @namespace    https://github.com/zenyi0910/TM-loadtw-downloader
 // @version      1.0.0
 // @description  load.tw 自動帶入日期密碼解鎖，一鍵下載影片/圖片
 // @author       Yi
@@ -9,8 +9,8 @@
 // @grant        GM_addStyle
 // @run-at       document-idle
 // @license      MIT
-// @downloadURL  https://github.com/Jeffrey0117/TM-loadtw-downloader/raw/main/loadtw-downloader.user.js
-// @updateURL    https://github.com/Jeffrey0117/TM-loadtw-downloader/raw/main/loadtw-downloader.user.js
+// @downloadURL  https://github.com/zenyi0910/TM-loadtw-downloader/raw/main/loadtw-downloader.user.js
+// @updateURL    https://github.com/zenyi0910/TM-loadtw-downloader/raw/main/loadtw-downloader.user.js
 // ==/UserScript==
 
 (function() {
