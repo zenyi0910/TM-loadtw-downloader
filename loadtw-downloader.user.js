@@ -249,30 +249,6 @@
     function tryDatePassword() {
         const host = location.hostname;
 
-        // 先嘗試 Dcard 傳來的密碼
-        const dcardPws = getDcardPasswords();
-        if (dcardPws.length > 0 && !GM_getValue('tm_tried_' + location.pathname, false)) {
-            GM_setValue('tm_tried_' + location.pathname, true);
-            const pw = dcardPws[0]; // 先試第一組
-
-            if (host.includes('load.tw')) {
-                const pwdInput = document.querySelector('input[name="password"], input[type="password"]');
-                if (pwdInput) {
-                    pwdInput.value = pw;
-                    const form = pwdInput.closest('form');
-                    if (form) { HTMLFormElement.prototype.submit.call(form); return true; }
-                }
-            } else {
-                const pwdInput = document.querySelector('input[placeholder*="密碼"], input[name*="pas"], input[name*="word"]');
-                const form = pwdInput ? pwdInput.closest('form') : document.querySelector('form');
-                if (pwdInput && form) {
-                    pwdInput.value = pw;
-                    try { HTMLFormElement.prototype.submit.call(form); } catch(e) { form.submit(); }
-                    return true;
-                }
-            }
-        }
-
         // load.tw: 從 URL 路徑取日期
         if (host.includes('load.tw')) {
             const match = location.pathname.match(/\/u\/\d{4}\/(\d{2})\/(\d{2})\//);
@@ -531,11 +507,19 @@
         setTimeout(() => observer.disconnect(), 30000);
     }
 
-    // myppt.cc 年齡確認
+    // myppt.cc / lurl.cc 年齡確認
     if (location.hostname.includes('myppt.cc') || location.hostname.includes('lurl.cc')) {
-        const ageBtn = document.querySelector('button');
-        if (ageBtn && (ageBtn.textContent.includes('18') || ageBtn.textContent.includes('進入'))) {
-            ageBtn.addEventListener('click', () => setTimeout(main, 1000));
+        const allBtns = document.querySelectorAll('button');
+        let ageBtn = null;
+        for (const btn of allBtns) {
+            if (btn.textContent.includes('18') || btn.textContent.includes('進入')) {
+                ageBtn = btn;
+                break;
+            }
+        }
+        if (ageBtn) {
+            ageBtn.click();
+            setTimeout(main, 1000);
         } else {
             main();
         }
