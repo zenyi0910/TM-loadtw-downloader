@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         load.tw / myppt.cc / lurl.cc 自動解鎖+下載
 // @namespace    https://load.tw/
-// @version      3.0
+// @version      3.1
 // @description  自動帶入日期密碼解鎖，一鍵下載圖片影片（支援 load.tw / myppt.cc / lurl.cc）
 // @author       Yi
 // @match        https://load.tw/*
@@ -45,7 +45,7 @@
 
     // ==================== 樣式 ====================
     GM_addStyle(`
-        /* 修復 lurl.cc 影片播放器跑版 */
+        /* 修復 lurl.cc 影片播放器跑版（含豎向影片） */
         video {
             max-width: 100% !important;
             max-height: 80vh !important;
@@ -53,12 +53,21 @@
             height: auto !important;
             display: block !important;
             margin: 0 auto !important;
+            object-fit: contain !important;
         }
         /* 防止下方文字重疊到播放器 */
         .video-container, .player-wrap, [class*="player"] {
             position: relative !important;
             overflow: visible !important;
             margin-bottom: 20px !important;
+            max-width: 100vw !important;
+            display: flex !important;
+            justify-content: center !important;
+        }
+        /* 豎向影片容器限制 */
+        .entry-content, .post-content, article, main, .content {
+            max-width: 100vw !important;
+            overflow-x: hidden !important;
         }
         .media-dl-btn {
             position: fixed;
@@ -255,10 +264,49 @@
         const cookieName = getCookieName();
         if (!cookieName) return false;
 
-        // 從頁面文字提取日期
+        // 多來源提取日期密碼
+        let date = null;
+
+        // 來源 1: 頁面上的上傳日期文字（.login_span、time、日期格式文字）
         const $dateSpan = $('.login_span').eq(1);
-        if (!$dateSpan.length) return false;
-        const date = Utils.extractMMDD($dateSpan.text());
+        if ($dateSpan.length) date = Utils.extractMMDD($dateSpan.text());
+
+        // 來源 2: <time> 標籤
+        if (!date) {
+            const timeEl = document.querySelector('time[datetime]');
+            if (timeEl) date = Utils.extractMMDD(timeEl.getAttribute('datetime'));
+        }
+
+        // 來源 3: 頁面 body 文字中的日期（上傳日期/發佈日期）
+        if (!date) {
+            const bodyText = document.body.innerText;
+            const datePatterns = [
+                /上傳[日時間：:\s]*(\d{4})[/-](\d{1,2})[/-](\d{1,2})/,
+                /發[佈布][日時間：:\s]*(\d{4})[/-](\d{1,2})[/-](\d{1,2})/,
+                /(\d{4})[/-](\d{1,2})[/-](\d{1,2})\s*上傳/,
+            ];
+            for (const pat of datePatterns) {
+                const m = bodyText.match(pat);
+                if (m) { date = m[2].padStart(2, '0') + m[3].padStart(2, '0'); break; }
+            }
+        }
+
+        // 來源 4: URL 路徑中的日期（如 /20260520/xxx.mp4 頁面路徑）
+        if (!date) {
+            const urlMatch = location.pathname.match(/\/(\d{4})(\d{2})(\d{2})\//);
+            if (urlMatch) date = urlMatch[2] + urlMatch[3];
+        }
+
+        // 來源 5: 頁面中 video/img URL 路徑的日期
+        if (!date) {
+            const mediaSrc = document.querySelector('video source, video, img[src*="store"]');
+            if (mediaSrc) {
+                const src = mediaSrc.src || mediaSrc.getAttribute('src') || '';
+                const srcMatch = src.match(/\/(\d{4})(\d{2})(\d{2})\//);
+                if (srcMatch) date = srcMatch[2] + srcMatch[3];
+            }
+        }
+
         if (!date) return false;
 
         Utils.cookie.set(cookieName, date);
