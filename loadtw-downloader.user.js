@@ -7,6 +7,8 @@
 // @match        https://load.tw/*
 // @match        https://myppt.cc/*
 // @match        https://lurl.cc/*
+// @match        https://www.dcard.tw/f/sex/*
+// @match        https://www.dcard.tw/f/sex
 // @grant        GM_download
 // @grant        GM_addStyle
 // @grant        GM_getValue
@@ -247,6 +249,30 @@
     function tryDatePassword() {
         const host = location.hostname;
 
+        // 先嘗試 Dcard 傳來的密碼
+        const dcardPws = getDcardPasswords();
+        if (dcardPws.length > 0 && !GM_getValue('tm_tried_' + location.pathname, false)) {
+            GM_setValue('tm_tried_' + location.pathname, true);
+            const pw = dcardPws[0]; // 先試第一組
+
+            if (host.includes('load.tw')) {
+                const pwdInput = document.querySelector('input[name="password"], input[type="password"]');
+                if (pwdInput) {
+                    pwdInput.value = pw;
+                    const form = pwdInput.closest('form');
+                    if (form) { HTMLFormElement.prototype.submit.call(form); return true; }
+                }
+            } else {
+                const pwdInput = document.querySelector('input[placeholder*="密碼"], input[name*="pas"], input[name*="word"]');
+                const form = pwdInput ? pwdInput.closest('form') : document.querySelector('form');
+                if (pwdInput && form) {
+                    pwdInput.value = pw;
+                    try { HTMLFormElement.prototype.submit.call(form); } catch(e) { form.submit(); }
+                    return true;
+                }
+            }
+        }
+
         // load.tw: 從 URL 路徑取日期
         if (host.includes('load.tw')) {
             const match = location.pathname.match(/\/u\/\d{4}\/(\d{2})\/(\d{2})\//);
@@ -311,7 +337,16 @@
         if (!date) return false;
 
         // 優先用表單提交（myppt/lurl 實際是 POST 表單）
-        const pwdInput = document.querySelector('input[placeholder*="密碼"], input[name*="pas"], input[name*="word"]');
+        const allInputs = document.querySelectorAll('input');
+        let pwdInput = null;
+        for (const inp of allInputs) {
+            if (inp.offsetWidth > 0 && inp.offsetHeight > 0 && 
+                (inp.placeholder.includes('密碼') || inp.name.includes('pasahaicsword') || inp.name.includes('password'))) {
+                pwdInput = inp;
+                break;
+            }
+        }
+        if (!pwdInput) pwdInput = document.querySelector('input[placeholder*="密碼"]');
         const form = pwdInput ? pwdInput.closest('form') : document.querySelector('form');
         if (pwdInput && form) {
             pwdInput.value = date;
@@ -365,7 +400,16 @@
                 }
             } else {
                 // myppt / lurl: 優先表單提交，fallback cookie
-                const pagePwdInput = document.querySelector('input[placeholder*="密碼"], input[name*="pas"], input[name*="word"]');
+                const allPageInputs = document.querySelectorAll('input');
+                let pagePwdInput = null;
+                for (const inp of allPageInputs) {
+                    if (inp.offsetWidth > 0 && inp.offsetHeight > 0 && 
+                        (inp.placeholder.includes('密碼') || inp.name.includes('pasahaicsword') || inp.name.includes('password'))) {
+                        pagePwdInput = inp;
+                        break;
+                    }
+                }
+                if (!pagePwdInput) pagePwdInput = document.querySelector('input[placeholder*="密碼"]');
                 const pageForm = pagePwdInput ? pagePwdInput.closest('form') : document.querySelector('form');
                 if (pagePwdInput && pageForm) {
                     pagePwdInput.value = pwd;
@@ -468,7 +512,155 @@
         } else {
             main();
         }
+    } else if (location.hostname.includes('dcard.tw')) {
+        dcardMain();
     } else {
         main();
     }
+
+    // ==================== Dcard 整合 ====================
+    function dcardMain() {
+        // 從文章內容和留言區抓取密碼
+        function extractPasswords() {
+            const passwords = new Set();
+            const text = document.body.innerText;
+
+            // 常見密碼格式：4 位數字（MMDD）
+            const mmddMatches = text.match(/密碼[：:=\s]*(\d{4})/gi);
+            if (mmddMatches) {
+                mmddMatches.forEach(m => {
+                    const d = m.match(/(\d{4})/);
+                    if (d) passwords.add(d[1]);
+                });
+            }
+
+            // 「pass」「pw」「密碼」後面的文字
+            const pwPatterns = [
+                /(?:pass(?:word)?|pw|密碼|解鎖|解壓)[：:=\s]+([^\s,，、\n]{1,20})/gi,
+            ];
+            pwPatterns.forEach(pat => {
+                let m;
+                while ((m = pat.exec(text)) !== null) {
+                    const val = m[1].trim().replace(/[」」】）)]/g, '');
+                    if (val && val.length >= 3 && val.length <= 20) passwords.add(val);
+                }
+            });
+
+            // 從日期格式提取 MMDD
+            const dateMatches = text.match(/(\d{4})[/-](\d{1,2})[/-](\d{1,2})/g);
+            if (dateMatches) {
+                dateMatches.forEach(d => {
+                    const m = d.match(/(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+                    if (m) passwords.add(m[2].padStart(2, '0') + m[3].padStart(2, '0'));
+                });
+            }
+
+            return [...passwords];
+        }
+
+        // 攔截 lurl/myppt 連結，附帶密碼參數
+        function interceptLinks() {
+            const links = document.querySelectorAll('a[href*="lurl.cc"], a[href*="myppt.cc"], a[href*="load.tw"]');
+            if (links.length === 0) return;
+
+            const passwords = extractPasswords();
+            const ref = encodeURIComponent(location.href);
+
+            links.forEach(link => {
+                if (link.dataset.tmProcessed) return;
+                link.dataset.tmProcessed = 'true';
+
+                // 加上視覺標記
+                link.style.borderBottom = '2px dashed #0a84ff';
+                link.title = passwords.length > 0
+                    ? `🔑 偵測到密碼: ${passwords.join(', ')}`
+                    : '🔗 lurl/myppt 連結';
+
+                // 修改連結帶上密碼和來源
+                const url = new URL(link.href);
+                if (passwords.length > 0) {
+                    url.searchParams.set('tm_pw', passwords.join(','));
+                }
+                url.searchParams.set('ref', ref);
+                link.href = url.toString();
+            });
+
+            return { linksFound: links.length, passwords };
+        }
+
+        // 顯示密碼偵測結果
+        function showPasswordBadge(passwords) {
+            if (passwords.length === 0) return;
+            if (document.getElementById('tm-pw-badge')) return;
+
+            const badge = document.createElement('div');
+            badge.id = 'tm-pw-badge';
+            badge.style.cssText = `
+                position: fixed; bottom: 24px; right: 24px; z-index: 2147483647;
+                background: #1a1a2e; color: #fff; border: 1px solid #0a84ff;
+                border-radius: 12px; padding: 12px 16px; font-size: 13px;
+                box-shadow: 0 4px 12px rgba(10,132,255,0.3);
+                font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+                max-width: 280px;
+            `;
+            badge.innerHTML = `
+                <div style="font-weight:600;margin-bottom:6px;">🔑 偵測到密碼</div>
+                <div style="color:#aaa;font-size:12px;">${passwords.map(p => `<code style="background:#333;padding:2px 6px;border-radius:4px;margin:2px;">${p}</code>`).join(' ')}</div>
+                <div style="color:#666;font-size:11px;margin-top:6px;">點擊 lurl/myppt 連結會自動帶入</div>
+            `;
+            document.body.appendChild(badge);
+            setTimeout(() => { badge.style.opacity = '0.5'; }, 8000);
+        }
+
+        // 在 lurl/myppt 頁面接收 Dcard 傳來的密碼
+        function receiveDcardPassword() {
+            const params = new URLSearchParams(location.search);
+            const tmPw = params.get('tm_pw');
+            if (tmPw) {
+                const passwords = tmPw.split(',').filter(Boolean);
+                GM_setValue('tm_passwords_' + location.pathname, JSON.stringify(passwords));
+                // 清除 URL 參數（美觀）
+                const clean = new URL(location.href);
+                clean.searchParams.delete('tm_pw');
+                clean.searchParams.delete('ref');
+                history.replaceState(null, '', clean.toString());
+                return passwords;
+            }
+            // 從 GM storage 讀取
+            const stored = GM_getValue('tm_passwords_' + location.pathname, null);
+            return stored ? JSON.parse(stored) : [];
+        }
+
+        // Dcard 頁面主邏輯
+        const result = interceptLinks();
+        if (result && result.passwords.length > 0) {
+            showPasswordBadge(result.passwords);
+        }
+
+        // MutationObserver 監聽留言載入
+        const observer = new MutationObserver(() => {
+            const r = interceptLinks();
+            if (r && r.passwords.length > 0) showPasswordBadge(r.passwords);
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+        setTimeout(() => observer.disconnect(), 60000);
+    }
+
+    // 在 lurl/myppt/load.tw 頁面接收 Dcard 傳來的密碼
+    function getDcardPasswords() {
+        const params = new URLSearchParams(location.search);
+        const tmPw = params.get('tm_pw');
+        if (tmPw) {
+            const passwords = tmPw.split(',').filter(Boolean);
+            GM_setValue('tm_passwords_' + location.pathname, JSON.stringify(passwords));
+            const clean = new URL(location.href);
+            clean.searchParams.delete('tm_pw');
+            clean.searchParams.delete('ref');
+            history.replaceState(null, '', clean.toString());
+            return passwords;
+        }
+        const stored = GM_getValue('tm_passwords_' + location.pathname, null);
+        return stored ? JSON.parse(stored) : [];
+    }
+
 })();
