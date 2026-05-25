@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         load.tw / myppt.cc / lurl.cc 自動解鎖+下載
 // @namespace    https://load.tw/
-// @version      3.1
+// @version      3.1.1
 // @description  自動帶入日期密碼解鎖，一鍵下載圖片影片（支援 load.tw / myppt.cc / lurl.cc）
 // @author       Yi
 // @match        https://load.tw/*
@@ -281,9 +281,10 @@
         if (!date) {
             const bodyText = document.body.innerText;
             const datePatterns = [
-                /上傳[日時間：:\s]*(\d{4})[/-](\d{1,2})[/-](\d{1,2})/,
-                /發[佈布][日時間：:\s]*(\d{4})[/-](\d{1,2})[/-](\d{1,2})/,
+                /上傳[日期時間：:\s]*([\d]{4})[/-](\d{1,2})[/-](\d{1,2})/,
+                /發[佈布][日期時間：:\s]*([\d]{4})[/-](\d{1,2})[/-](\d{1,2})/,
                 /(\d{4})[/-](\d{1,2})[/-](\d{1,2})\s*上傳/,
+                /(\d{4})[/-](\d{1,2})[/-](\d{1,2})\s+\d{1,2}:\d{2}/,
             ];
             for (const pat of datePatterns) {
                 const m = bodyText.match(pat);
