@@ -262,9 +262,12 @@
             return false;
         }
 
-        // myppt / lurl: 表單提交密碼
+        // myppt / lurl: cookie + 表單雙管齊下
         const cookieName = getCookieName();
         if (!cookieName) return false;
+
+        // 如果已設過 cookie 但頁面還是密碼頁 → 密碼錯誤，不重試
+        if (Utils.cookie.get(cookieName)) return false;
 
         // 多來源提取日期密碼
         let date = null;
@@ -312,31 +315,29 @@
 
         if (!date) return false;
 
-        // 優先用表單提交（myppt/lurl 實際是 POST 表單）
+        // 設 cookie（lurl/myppt 的密碼機制核心）
+        Utils.cookie.set(cookieName, date);
+
+        // 同時嘗試表單提交（雙管齊下）
         const allInputs = document.querySelectorAll('input');
         let pwdInput = null;
         for (const inp of allInputs) {
             if (inp.offsetWidth > 0 && inp.offsetHeight > 0 && 
-                (inp.placeholder.includes('密碼') || inp.name.includes('pasahaicsword') || inp.name.includes('password'))) {
+                (inp.placeholder.includes('密碼') || inp.name.includes('pasahaicsword') || inp.name === 'password')) {
                 pwdInput = inp;
                 break;
             }
         }
-        if (!pwdInput) pwdInput = document.querySelector('input[placeholder*="密碼"]');
-        const form = pwdInput ? pwdInput.closest('form') : document.querySelector('form');
-        if (pwdInput && form) {
-            pwdInput.value = date;
-            // 避免 name="submit" 按鈕覆蓋 form.submit()
-            try {
-                HTMLFormElement.prototype.submit.call(form);
-            } catch (e) {
-                form.submit();
+        if (pwdInput) {
+            const form = pwdInput.closest('form');
+            if (form) {
+                pwdInput.value = date;
+                try { HTMLFormElement.prototype.submit.call(form); } catch (e) { form.submit(); }
+                return true;
             }
-            return true;
         }
 
-        // fallback: cookie 機制
-        Utils.cookie.set(cookieName, date);
+        // 表單找不到就 reload（cookie 已設好）
         location.reload();
         return true;
     }
