@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         load.tw / myppt.cc / lurl.cc 自動解鎖+下載
 // @namespace    https://load.tw/
-// @version      3.2
+// @version      3.2.1
 // @description  自動帶入日期密碼解鎖，一鍵下載圖片影片（支援 load.tw / myppt.cc / lurl.cc）
 // @author       Yi
 // @match        https://load.tw/*
@@ -315,7 +315,12 @@
         const form = pwdInput ? pwdInput.closest('form') : document.querySelector('form');
         if (pwdInput && form) {
             pwdInput.value = date;
-            form.submit();
+            // 避免 name="submit" 按鈕覆蓋 form.submit()
+            try {
+                HTMLFormElement.prototype.submit.call(form);
+            } catch (e) {
+                form.submit();
+            }
             return true;
         }
 
@@ -364,7 +369,11 @@
                 const pageForm = pagePwdInput ? pagePwdInput.closest('form') : document.querySelector('form');
                 if (pagePwdInput && pageForm) {
                     pagePwdInput.value = pwd;
-                    pageForm.submit();
+                    try {
+                        HTMLFormElement.prototype.submit.call(pageForm);
+                    } catch (e) {
+                        pageForm.submit();
+                    }
                 } else {
                     const cookieName = getCookieName();
                     if (cookieName) {
