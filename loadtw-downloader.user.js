@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         load.tw / myppt.cc / lurl.cc 自動解鎖+下載
 // @namespace    https://load.tw/
-// @version      4.1
+// @version      4.2
 // @description  自動帶入日期密碼解鎖，一鍵下載圖片影片（支援 load.tw / myppt.cc / lurl.cc / Dcard 密碼抓取）
 // @author       Yi
 // @match        https://load.tw/*
@@ -263,12 +263,36 @@
         for (const b of btns) { if (b.textContent.includes('18')||b.textContent.includes('進入')) { b.click(); return; } }
     }
 
+    // ==================== 版本更新檢查 ====================
+    const SCRIPT_VERSION = '4.2';
+    function checkUpdate() {
+        const lastCheck = GM_getValue('tm_update_check', 0);
+        if (Date.now() - lastCheck < 24 * 60 * 60 * 1000) return;
+        GM_setValue('tm_update_check', Date.now());
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: 'https://raw.githubusercontent.com/zenyi0910/TM-loadtw-downloader/main/loadtw-downloader.user.js',
+            onload: (r) => {
+                const m = r.responseText.match(/@version\s+([\d.]+)/);
+                if (m && m[1] !== SCRIPT_VERSION) {
+                    const badge = document.createElement('div');
+                    badge.style.cssText = 'position:fixed;top:20px;right:20px;z-index:2147483647;background:#1a1a2e;color:#fff;border:1px solid #f59e0b;border-radius:12px;padding:14px 18px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,0.3);max-width:280px;';
+                    badge.innerHTML = `<div style="font-weight:600;margin-bottom:6px;">🔄 有新版本 v${m[1]}</div><a href="https://github.com/zenyi0910/TM-loadtw-downloader/raw/main/loadtw-downloader.user.js" target="_blank" style="color:#0a84ff;">點此更新</a> <span style="color:#666;margin-left:8px;cursor:pointer;" id="tm-dismiss">✕</span>`;
+                    document.body.appendChild(badge);
+                    badge.querySelector('#tm-dismiss').onclick = () => badge.remove();
+                }
+            }
+        });
+    }
+
     // ==================== Router ====================
     const host = location.hostname;
 
     if (host.includes('dcard.tw')) {
+        checkUpdate();
         dcardMain();
     } else if (host.includes('myppt.cc') || host.includes('lurl.cc')) {
+        checkUpdate();
         autoConfirmAge();
         const dcardPws = getDcardPasswords();
         const regex = host.includes('myppt') ? /myppt\.cc\/(\w+)/ : /lurl\.cc\/(\w+)/;
