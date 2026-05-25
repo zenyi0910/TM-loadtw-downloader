@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         load.tw / myppt.cc / lurl.cc 自動解鎖+下載
 // @namespace    https://load.tw/
-// @version      3.2.1
-// @description  自動帶入日期密碼解鎖，一鍵下載圖片影片（支援 load.tw / myppt.cc / lurl.cc）
+// @version      4.0
+// @description  自動帶入日期密碼解鎖，一鍵下載圖片影片（支援 load.tw / myppt.cc / lurl.cc / Dcard 密碼抓取）
 // @author       Yi
 // @match        https://load.tw/*
 // @match        https://myppt.cc/*
@@ -485,6 +485,33 @@
                 GM_setValue('auto_tried_' + location.pathname, true);
                 const success = tryDatePassword();
                 if (success) return; // 會 reload
+            }
+
+            // 日期密碼失敗 → 嘗試 Dcard 傳來的密碼
+            const dcardPws = getDcardPasswords();
+            if (dcardPws.length > 0) {
+                const triedKey = 'tm_dcard_tried_' + location.pathname;
+                const triedIdx = GM_getValue(triedKey, 0);
+                if (triedIdx < dcardPws.length) {
+                    GM_setValue(triedKey, triedIdx + 1);
+                    const pw = dcardPws[triedIdx];
+                    const allInputs = document.querySelectorAll('input');
+                    let pwdField = null;
+                    for (const inp of allInputs) {
+                        if (inp.offsetWidth > 0 && inp.offsetHeight > 0 &&
+                            (inp.placeholder.includes('密碼') || inp.name.includes('pasahaicsword') || inp.name.includes('password'))) {
+                            pwdField = inp;
+                            break;
+                        }
+                    }
+                    if (!pwdField) pwdField = document.querySelector('input[placeholder*="密碼"]');
+                    const pwForm = pwdField ? pwdField.closest('form') : document.querySelector('form');
+                    if (pwdField && pwForm) {
+                        pwdField.value = pw;
+                        pwForm.submit();
+                        return;
+                    }
+                }
             }
 
             // 自動密碼失敗或已嘗試過 → 顯示手動輸入面板
