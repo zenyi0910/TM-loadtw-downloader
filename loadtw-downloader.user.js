@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         load.tw / myppt.cc / lurl.cc 自動解鎖+下載
 // @namespace    https://load.tw/
-// @version      3.1.1
+// @version      3.2
 // @description  自動帶入日期密碼解鎖，一鍵下載圖片影片（支援 load.tw / myppt.cc / lurl.cc）
 // @author       Yi
 // @match        https://load.tw/*
@@ -260,7 +260,7 @@
             return false;
         }
 
-        // myppt / lurl: cookie 機制
+        // myppt / lurl: 表單提交密碼
         const cookieName = getCookieName();
         if (!cookieName) return false;
 
@@ -310,6 +310,16 @@
 
         if (!date) return false;
 
+        // 優先用表單提交（myppt/lurl 實際是 POST 表單）
+        const pwdInput = document.querySelector('input[placeholder*="密碼"], input[name*="pas"], input[name*="word"]');
+        const form = pwdInput ? pwdInput.closest('form') : document.querySelector('form');
+        if (pwdInput && form) {
+            pwdInput.value = date;
+            form.submit();
+            return true;
+        }
+
+        // fallback: cookie 機制
         Utils.cookie.set(cookieName, date);
         location.reload();
         return true;
@@ -349,13 +359,20 @@
                     status.textContent = '找不到密碼欄位';
                 }
             } else {
-                // myppt / lurl: 設 cookie 後 reload
-                const cookieName = getCookieName();
-                if (cookieName) {
-                    Utils.cookie.set(cookieName, pwd);
-                    location.reload();
+                // myppt / lurl: 優先表單提交，fallback cookie
+                const pagePwdInput = document.querySelector('input[placeholder*="密碼"], input[name*="pas"], input[name*="word"]');
+                const pageForm = pagePwdInput ? pagePwdInput.closest('form') : document.querySelector('form');
+                if (pagePwdInput && pageForm) {
+                    pagePwdInput.value = pwd;
+                    pageForm.submit();
                 } else {
-                    status.textContent = '無法辨識頁面';
+                    const cookieName = getCookieName();
+                    if (cookieName) {
+                        Utils.cookie.set(cookieName, pwd);
+                        location.reload();
+                    } else {
+                        status.textContent = '無法辨識頁面';
+                    }
                 }
             }
         };
