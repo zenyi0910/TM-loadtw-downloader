@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         load.tw / myppt.cc / lurl.cc 自動解鎖+下載
 // @namespace    https://load.tw/
-// @version      4.2
+// @version      4.3
 // @description  自動帶入日期密碼解鎖，一鍵下載圖片影片（支援 load.tw / myppt.cc / lurl.cc / Dcard 密碼抓取）
 // @author       Yi
 // @match        https://load.tw/*
@@ -20,19 +20,20 @@
 // @connect      lurl.cc
 // @connect      myppt.cc
 // @run-at       document-idle
-// @require      https://code.jquery.com/jquery-3.6.0.min.js
 // @updateURL    https://github.com/zenyi0910/TM-loadtw-downloader/raw/main/loadtw-downloader.user.js
 // @downloadURL  https://github.com/zenyi0910/TM-loadtw-downloader/raw/main/loadtw-downloader.user.js
 // ==/UserScript==
 
-(function($) {
+(function() {
     'use strict';
 
+    const SCRIPT_VERSION = '4.3';
+
+    // ==================== Utils ====================
     const Utils = {
         extractMMDD: (dateText) => {
-            const pattern = /(\d{4})-(\d{2})-(\d{2})/;
-            const match = dateText.match(pattern);
-            return match ? match[2] + match[3] : null;
+            const match = dateText.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+            return match ? match[2].padStart(2,'0') + match[3].padStart(2,'0') : null;
         },
         getQueryParam: (name) => new URLSearchParams(window.location.search).get(name),
         cookie: {
@@ -54,7 +55,9 @@
                 const a = document.createElement('a'); a.href = url; a.download = filename;
                 document.body.appendChild(a); a.click(); document.body.removeChild(a);
             }
-        }
+        },
+        qs: (sel, ctx) => (ctx || document).querySelector(sel),
+        qsa: (sel, ctx) => Array.from((ctx || document).querySelectorAll(sel))
     };
 
     GM_addStyle(`
@@ -71,7 +74,7 @@
         .tm-pwd-panel button { padding:8px 16px; border-radius:8px; border:none; background:#0a84ff; color:#fff; font-size:14px; font-weight:600; cursor:pointer; }
     `);
 
-    // ==================== 密碼 Helper（lurl/myppt 共用）====================
+    // ==================== 密碼 Helper ====================
     function makeDateHelper(siteRegex) {
         return {
             getCookieName: () => {
@@ -79,8 +82,9 @@
                 return m ? `psc_${m[1]}` : null;
             },
             isPasswordCorrect: () => {
-                const $s = $('#back_top .container.NEWii_con section:nth-child(6) h2 span');
-                const t = $s.text();
+                const el = Utils.qs('#back_top .container.NEWii_con section:nth-child(6) h2 span');
+                if (!el) return false;
+                const t = el.textContent;
                 return t.includes('成功') || t.includes('錯誤');
             },
             tryPassword: () => {
@@ -89,10 +93,11 @@
                 const cookieName = helper.getCookieName();
                 if (!cookieName) return false;
                 if (Utils.cookie.get(cookieName)) return false;
-                // 從 .login_span 取日期
-                const $dateSpan = $('.login_span').eq(1);
-                if ($dateSpan.length) {
-                    const date = Utils.extractMMDD($dateSpan.text());
+
+                // 從 .login_span 取日期（第二個）
+                const spans = Utils.qsa('.login_span');
+                if (spans.length > 1) {
+                    const date = Utils.extractMMDD(spans[1].textContent);
                     if (date) { Utils.cookie.set(cookieName, date); return true; }
                 }
                 // fallback: body 文字
@@ -110,64 +115,80 @@
 
     // ==================== 影片/圖片下載 ====================
     function getVideoUrl() {
-        const $v = $('video').first();
-        if ($v.attr('src')) return $v.attr('src');
-        const $s = $v.find('source').first();
-        return $s.attr('src') || null;
+        const v = Utils.qs('video');
+        if (!v) return null;
+        if (v.src) return v.src;
+        const s = Utils.qs('source', v);
+        return s ? s.src : null;
     }
+
     function getImageUrls() {
         const urls = [];
-        $('link[rel="preload"][as="image"]').each(function() {
-            const href = $(this).attr('href');
+        Utils.qsa('link[rel="preload"][as="image"]').forEach(el => {
+            const href = el.getAttribute('href');
             if (href && /\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(href)) urls.push(href);
         });
         if (!urls.length) {
-            $('img').each(function() {
-                const src = $(this).attr('src') || '';
+            Utils.qsa('img').forEach(el => {
+                const src = el.src || '';
                 if (src.includes('mplimit') || src.includes('store')) urls.push(src);
             });
         }
         return urls;
     }
+
     function replaceVideoPlayer() {
         const videoUrl = getVideoUrl();
         if (!videoUrl) return;
-        const $c = $('.video-js').first();
-        if ($c.length) {
-            $c.removeClass().removeAttr('oncontextmenu controlslist style').css({width:'100%',maxWidth:'100%',position:'relative'});
-            $c.find('.vjs-control-bar,.vjs-poster,.vjs-loading-spinner,.vjs-big-play-button,.vjs-text-track-display,.vjs-modal-dialog').remove();
-            const $v = $c.find('video');
-            if ($v.length) {
-                $v.attr({src:videoUrl,controls:true,preload:'metadata'}).removeClass()
-                  .removeAttr('oncontextmenu controlslist data-setup tabindex role style')
-                  .css({width:'100%',maxWidth:'100%',height:'auto',display:'block'});
-                $v[0].load();
+        const container = Utils.qs('.video-js');
+        if (container) {
+            container.className = '';
+            container.removeAttribute('oncontextmenu');
+            container.removeAttribute('controlslist');
+            container.style.cssText = 'width:100%;max-width:100%;position:relative';
+            Utils.qsa('.vjs-control-bar,.vjs-poster,.vjs-loading-spinner,.vjs-big-play-button,.vjs-text-track-display,.vjs-modal-dialog', container).forEach(el => el.remove());
+            const v = Utils.qs('video', container);
+            if (v) {
+                v.src = videoUrl;
+                v.controls = true;
+                v.preload = 'metadata';
+                v.className = '';
+                v.removeAttribute('oncontextmenu');
+                v.removeAttribute('controlslist');
+                v.removeAttribute('data-setup');
+                v.style.cssText = 'width:100%;max-width:100%;height:auto;display:block';
+                v.load();
             }
         }
     }
+
     function injectDownloadButton() {
-        if ($('.media-dl-btn').length) return;
+        if (Utils.qs('.media-dl-btn')) return;
         const videoUrl = getVideoUrl();
         if (videoUrl) {
-            const $btn = $('<button>',{text:'⬇ 下載影片',class:'media-dl-btn'});
-            $btn.on('click', async function() {
-                $btn.addClass('downloading').text('⏳ 下載中...');
+            const btn = document.createElement('button');
+            btn.textContent = '⬇ 下載影片';
+            btn.className = 'media-dl-btn';
+            btn.onclick = async () => {
+                btn.classList.add('downloading'); btn.textContent = '⏳ 下載中...';
                 await Utils.downloadFile(videoUrl, 'video.mp4');
-                $btn.removeClass('downloading').text('⬇ 下載影片');
-            });
-            $('body').append($btn);
+                btn.classList.remove('downloading'); btn.textContent = '⬇ 下載影片';
+            };
+            document.body.appendChild(btn);
             return;
         }
         const imgs = getImageUrls();
         if (imgs.length) {
             const label = imgs.length > 1 ? `⬇ 下載全部圖片 (${imgs.length})` : '⬇ 下載圖片';
-            const $btn = $('<button>',{text:label,class:'media-dl-btn'});
-            $btn.on('click', async function() {
-                $btn.addClass('downloading').text('⏳ 下載中...');
-                for (let i=0;i<imgs.length;i++) await Utils.downloadFile(imgs[i], `image_${i+1}.jpg`);
-                $btn.removeClass('downloading').text(label);
-            });
-            $('body').append($btn);
+            const btn = document.createElement('button');
+            btn.textContent = label;
+            btn.className = 'media-dl-btn';
+            btn.onclick = async () => {
+                btn.classList.add('downloading'); btn.textContent = '⏳ 下載中...';
+                for (let i = 0; i < imgs.length; i++) await Utils.downloadFile(imgs[i], `image_${i+1}.jpg`);
+                btn.classList.remove('downloading'); btn.textContent = label;
+            };
+            document.body.appendChild(btn);
         }
     }
 
@@ -180,7 +201,7 @@
             GM_setValue('tm_pw_' + location.pathname, JSON.stringify(pws));
             const clean = new URL(location.href);
             clean.searchParams.delete('tm_pw'); clean.searchParams.delete('ref');
-            history.replaceState(null,'',clean.toString());
+            history.replaceState(null, '', clean.toString());
             return pws;
         }
         const stored = GM_getValue('tm_pw_' + location.pathname, null);
@@ -189,15 +210,19 @@
 
     // ==================== 手動密碼面板 ====================
     function showPasswordPanel() {
-        if ($('.tm-pwd-panel').length) return;
-        const panel = $(`<div class="tm-pwd-panel">
+        if (Utils.qs('.tm-pwd-panel')) return;
+        const panel = document.createElement('div');
+        panel.className = 'tm-pwd-panel';
+        panel.innerHTML = `
             <label>🔑 輸入密碼解鎖</label>
             <input type="text" class="tm-pwd-input" placeholder="密碼（如 0523）"/>
             <button class="tm-pwd-submit">解鎖</button>
-        </div>`);
-        $('body').append(panel);
-        panel.find('.tm-pwd-submit').on('click', () => {
-            const pwd = panel.find('.tm-pwd-input').val().trim();
+        `;
+        document.body.appendChild(panel);
+        const input = panel.querySelector('.tm-pwd-input');
+        const submit = panel.querySelector('.tm-pwd-submit');
+        submit.onclick = () => {
+            const pwd = input.value.trim();
             if (!pwd) return;
             if (location.hostname.includes('load.tw')) {
                 const inp = document.querySelector('input[name="password"],input[type="password"]');
@@ -206,65 +231,65 @@
                 const m = location.href.match(/(?:myppt|lurl)\.cc\/(\w+)/);
                 if (m) { Utils.cookie.set(`psc_${m[1]}`, pwd); location.reload(); }
             }
-        });
-        panel.find('.tm-pwd-input').on('keydown', e => { if (e.key==='Enter') panel.find('.tm-pwd-submit').click(); });
+        };
+        input.onkeydown = (e) => { if (e.key === 'Enter') submit.click(); };
     }
 
-    // ==================== DcardHandler ====================
+    // ==================== Dcard Handler ====================
     function dcardMain() {
         function extractPasswords() {
-            const pws = new Set(); const text = document.body.innerText;
+            const pws = new Set();
+            const text = document.body.innerText;
             const patterns = [/(?:pass(?:word)?|pw|密碼|解鎖|解壓)[：:=\s]+([^\s,，、\n]{1,20})/gi];
-            patterns.forEach(pat => { let m; while((m=pat.exec(text))!==null) {
-                const v = m[1].trim().replace(/[」」】）)]/g,'');
-                if (v && v.length>=3 && v.length<=20) pws.add(v);
-            }});
-            const mmdd = text.match(/密碼[：:=\s]*(\d{4})/gi);
-            if (mmdd) mmdd.forEach(m => { const d=m.match(/(\d{4})/); if(d) pws.add(d[1]); });
-            const dates = text.match(/(\d{4})[/-](\d{1,2})[/-](\d{1,2})/g);
-            if (dates) dates.forEach(d => { const m=d.match(/(\d{4})[/-](\d{1,2})[/-](\d{1,2})/); if(m) pws.add(m[2].padStart(2,'0')+m[3].padStart(2,'0')); });
+            patterns.forEach(pat => {
+                let m;
+                while ((m = pat.exec(text)) !== null) {
+                    const v = m[1].trim().replace(/[」」】）)]/g, '');
+                    if (v && v.length >= 3 && v.length <= 20) pws.add(v);
+                }
+            });
+            // 4 位數字
+            const dateMatch = text.match(/密碼[：:=\s]*(\d{4})/);
+            if (dateMatch) pws.add(dateMatch[1]);
+            // 頁面日期 fallback
+            const pageDate = text.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+            if (pageDate) pws.add(pageDate[2].padStart(2,'0') + pageDate[3].padStart(2,'0'));
             return [...pws];
         }
+
         function interceptLinks() {
-            const links = document.querySelectorAll('a[href*="lurl.cc"],a[href*="myppt.cc"],a[href*="load.tw"]');
-            if (!links.length) return {linksFound:0,passwords:[]};
-            const passwords = extractPasswords();
+            const pws = extractPasswords();
+            if (!pws.length) return;
+            const pwParam = pws.join(',');
             const ref = encodeURIComponent(location.href);
-            links.forEach(link => {
-                if (link.dataset.tmProcessed) return;
-                link.dataset.tmProcessed = 'true';
-                link.style.borderBottom = '2px dashed #0a84ff';
-                link.title = passwords.length ? `🔑 密碼: ${passwords.join(', ')}` : '🔗 lurl/myppt';
-                const url = new URL(link.href);
-                if (passwords.length) url.searchParams.set('tm_pw', passwords.join(','));
-                url.searchParams.set('ref', ref);
-                link.href = url.toString();
+            Utils.qsa('a[href]').forEach(a => {
+                const href = a.href;
+                if (/(?:lurl\.cc|myppt\.cc)\/\w+/.test(href) && !href.includes('tm_pw')) {
+                    const sep = href.includes('?') ? '&' : '?';
+                    a.href = `${href}${sep}tm_pw=${pwParam}&ref=${ref}`;
+                    a.style.cssText += ';border-bottom:2px solid #0a84ff;';
+                }
             });
-            return {linksFound:links.length, passwords};
         }
-        function showBadge(passwords) {
-            if (!passwords.length || document.getElementById('tm-pw-badge')) return;
-            const badge = document.createElement('div'); badge.id = 'tm-pw-badge';
-            badge.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:2147483647;background:#1a1a2e;color:#fff;border:1px solid #0a84ff;border-radius:12px;padding:12px 16px;font-size:13px;box-shadow:0 4px 12px rgba(10,132,255,0.3);max-width:280px;';
-            badge.innerHTML = `<div style="font-weight:600;margin-bottom:6px;">🔑 偵測到密碼</div><div style="color:#aaa;font-size:12px;">${passwords.map(p=>`<code style="background:#333;padding:2px 6px;border-radius:4px;">${p}</code>`).join(' ')}</div><div style="color:#666;font-size:11px;margin-top:6px;">點擊連結會自動帶入</div>`;
-            document.body.appendChild(badge);
-            setTimeout(()=>{badge.style.opacity='0.5';},8000);
-        }
-        const r = interceptLinks();
-        if (r.passwords.length) showBadge(r.passwords);
-        const obs = new MutationObserver(()=>{ const r2=interceptLinks(); if(r2.passwords.length) showBadge(r2.passwords); });
-        obs.observe(document.body,{childList:true,subtree:true});
-        setTimeout(()=>obs.disconnect(),60000);
+
+        // 初始執行 + MutationObserver 監聽動態載入
+        interceptLinks();
+        const obs = new MutationObserver(() => interceptLinks());
+        obs.observe(document.body, { childList: true, subtree: true });
     }
 
     // ==================== 年齡確認 ====================
     function autoConfirmAge() {
         const btns = document.querySelectorAll('button');
-        for (const b of btns) { if (b.textContent.includes('18')||b.textContent.includes('進入')) { b.click(); return; } }
+        for (const b of btns) {
+            if (b.textContent.includes('18') || b.textContent.includes('進入')) {
+                b.click();
+                return;
+            }
+        }
     }
 
     // ==================== 版本更新檢查 ====================
-    const SCRIPT_VERSION = '4.2';
     function checkUpdate() {
         const lastCheck = GM_getValue('tm_update_check', 0);
         if (Date.now() - lastCheck < 24 * 60 * 60 * 1000) return;
@@ -276,13 +301,34 @@
                 const m = r.responseText.match(/@version\s+([\d.]+)/);
                 if (m && m[1] !== SCRIPT_VERSION) {
                     const badge = document.createElement('div');
-                    badge.style.cssText = 'position:fixed;top:20px;right:20px;z-index:2147483647;background:#1a1a2e;color:#fff;border:1px solid #f59e0b;border-radius:12px;padding:14px 18px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,0.3);max-width:280px;';
+                    badge.style.cssText = 'position:fixed;top:16px;right:16px;z-index:2147483647;background:#1a1a2e;border:1px solid #444;border-radius:12px;padding:12px 16px;box-shadow:0 4px 12px rgba(0,0,0,0.4);color:#fff;font-size:13px;';
                     badge.innerHTML = `<div style="font-weight:600;margin-bottom:6px;">🔄 有新版本 v${m[1]}</div><a href="https://github.com/zenyi0910/TM-loadtw-downloader/raw/main/loadtw-downloader.user.js" target="_blank" style="color:#0a84ff;">點此更新</a> <span style="color:#666;margin-left:8px;cursor:pointer;" id="tm-dismiss">✕</span>`;
                     document.body.appendChild(badge);
                     badge.querySelector('#tm-dismiss').onclick = () => badge.remove();
                 }
             }
         });
+    }
+
+    // ==================== load.tw Handler ====================
+    function loadTwMain() {
+        // load.tw 用 POST 表單提交密碼
+        const pwInput = document.querySelector('input[name="password"],input[type="password"]');
+        if (pwInput) {
+            // 從 URL 路徑取日期 /u/2026/05/25/
+            const pathMatch = location.pathname.match(/\/u\/(\d{4})\/(\d{2})\/(\d{2})\//);
+            if (pathMatch) {
+                const pwd = pathMatch[2] + pathMatch[3];
+                pwInput.value = pwd;
+                pwInput.closest('form').submit();
+                return;
+            }
+        }
+        // 已解鎖
+        if (Utils.qs('video') || getImageUrls().length) {
+            replaceVideoPlayer();
+            injectDownloadButton();
+        }
     }
 
     // ==================== Router ====================
@@ -309,29 +355,17 @@
             }
         }
         // 已解鎖 → 注入下載按鈕
-        $(document).ready(() => {
-            if ($('video').length || getImageUrls().length) {
-                replaceVideoPlayer();
-                injectDownloadButton();
-            } else {
-                // 還在密碼頁 → 顯示手動面板
-                showPasswordPanel();
-            }
-        });
-    } else if (host.includes('load.tw')) {
-        const dcardPws = getDcardPasswords();
-        // 密碼頁
-        const pwInput = document.querySelector('input[name="password"],input[type="password"]');
-        if (pwInput) {
-            // 從 URL 取日期
-            const m = location.pathname.match(/\/u\/\d{4}\/(\d{2})\/(\d{2})\//);
-            if (m) { pwInput.value = m[1]+m[2]; pwInput.closest('form').submit(); }
-            else if (dcardPws.length) { pwInput.value = dcardPws[0]; pwInput.closest('form').submit(); }
-            else { showPasswordPanel(); }
+        if (Utils.qs('video') || getImageUrls().length) {
+            replaceVideoPlayer();
+            injectDownloadButton();
         } else {
-            // 已解鎖
-            $(document).ready(() => { replaceVideoPlayer(); injectDownloadButton(); });
+            // 還在密碼頁 → 顯示手動面板
+            showPasswordPanel();
         }
+    } else if (host.includes('load.tw')) {
+        checkUpdate();
+        autoConfirmAge();
+        loadTwMain();
     }
 
 })();
